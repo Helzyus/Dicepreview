@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Image target with glb (only Android)</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <link type="text/css" rel="stylesheet" href="style.css" />
+    <script
+      src="https://unpkg.com/three@0.133.0/build/three.js"
+      crossorigin="anonymous"
+    ></script>
+    <script src="https://unpkg.com/three@0.133.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="//cdn.jsdelivr.net/npm/eruda"></script>
+  </head>
+
+  <body>
+    <div id="console-ui"></div>
+    <script type="module">
+      setupMobileDebug();
+      //  Camera Glitchy as fack
+
+      import { ARButton } from "https://unpkg.com/three@0.133.0/examples/jsm/webxr/ARButton.js";
+
+      
+      let camera, scene, renderer;
+      let container;
+      let mesh;
+      let image;
+      let loader; //GLB apenas
+      let model; // referência do modelo
+      let mixer;
+		  const clock = new THREE.Clock();
+      
+
+      init();
+      animate();
+      
+      function setupMobileDebug() {
+   
+        const containerEl = document.getElementById("console-ui");
+        eruda.init({
+          container: containerEl
+        });
+        const devToolEl = containerEl.shadowRoot.querySelector('.eruda-dev-tools');
+        devToolEl.style.height = '40%'; 
+      }
+
+      async function init() {
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+
+        scene = new THREE.Scene();
+
+        camera = new THREE.PerspectiveCamera(
+          70,
+          window.innerWidth / window.innerHeight,
+          0.01,
+          40
+        );
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.xr.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+        light.position.set(0.5, 1, 0.25);
+        scene.add(light);
+
+        await loadModel();
+
+        // Input do Image target (utilizar apenas 300 DPIs)
+        const url =
+          "https://cdn.glitch.global/86d3da79-092a-4b44-b353-ae4e8b9b2a74/Dice_Marcador.jpg?v=1675961377894";
+        const imgBitmap = await getImageBitmap(url);
+
+        const button = ARButton.createButton(renderer, {
+          requiredFeatures: ["image-tracking"], 
+          trackedImages: [
+            {
+              image: imgBitmap, // Dar a conhecer ao WEBXR o que vamos fazer tracking
+              widthInMeters: 0.7,
+            },
+          ],
+          optionalFeatures: ["dom-overlay", "dom-overlay-for-handheld-ar"], // debugg
+          domOverlay: {
+            root: document.body
+          }
+        });
+        document.body.appendChild(button);
+
+        window.addEventListener("resize", onWindowResize, false);
+      }
+      
+      // add the model one time to the scene
+      
+      async function loadModel() {
+     
+      
+      
+      // Fazer load do modelo para a cena (scene)
+      const modelUrl = 'https://cdn.glitch.me/86d3da79-092a-4b44-b353-ae4e8b9b2a74/Dice_RY.glb?v=1677177391037';
+      
+			loader = new THREE.GLTFLoader();
+      const gltf = await loader.loadAsync(modelUrl);
+      model = gltf.scene;
+      model.position.z = -3; // ALTITUDE DO MODELO EM RELAÇÃO AO MARCADOR // BASTANTE IMPORTANTE
+
+      // Animação do Modelo
+     
+        model.scale.multiplyScalar(2);
+        model.visible = false; // começa como invisivel
+
+      mixer = new THREE.AnimationMixer(model);
+
+      // animações do modelo
+      console.log(gltf.animations);
+
+      gltf.animations.forEach((clip) => {
+        const action = mixer.clipAction(clip);
+        action.play(); // começar a animação
+      });
+
+      scene.add(model);
+    }
+
+    
+		function onWindowResize() {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+
+			renderer.setSize(window.innerWidth, window.innerHeight);
+		}
+
+		// esta função só é chamada uma única vez
+		function animate() {
+			// Loop da Animação
+			renderer.setAnimationLoop(render);
+		}
+      
+        async function getImageBitmap(url) {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const imageBitmap = await createImageBitmap(blob);
+        return imageBitmap;
+      }
+
+
+      function updateMesh(pose) {
+        if (model) {
+          model.rotation.x = pose.transform.orientation.x;
+          model.rotation.y = pose.transform.orientation.y;
+          model.rotation.z = pose.transform.orientation.z;
+          
+          model.position.x = pose.transform.position.x;
+          model.position.y = pose.transform.position.y;
+          model.position.z = pose.transform.position.z;
+        }
+      }
+      
+ function render(timestamp, frame,) {    
+        
+   
+        if (frame) {
+          const results = frame.getImageTrackingResults();
+
+          for (const result of results) {
+           
+            const imageIndex = result.index;
+
+            // Posição do Modelo em relação ao espaço
+            const referenceSpace = renderer.xr.getReferenceSpace();
+            const pose = frame.getPose(result.imageSpace, referenceSpace);
+
+            const state = result.trackingState;
+            
+            
+
+            if (state == "tracked") {
+              // Se a imagem é identificada começa o processo
+             
+              if (model) {
+                model.visible = true;
+                  updateMesh(pose);
+              const delta = clock.getDelta();
+		      	if (mixer) {
+				// render a 60fps
+				mixer.update(delta);
+            }
+          
+  
+              } else if (state == "emulated") {
+              // se a imagem é perdida o modelo desaparece
+              if (model) {
+                model.visible = true;
+              }
+              // console.log("Image target no longer seen");
+            }
+          }
+        }
+        renderer.render(scene, camera);
+      }
+ }
+    </script>
+  </body>
+</html>
